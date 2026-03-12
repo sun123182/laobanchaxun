@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>角色经验统计</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 20px; background: #f5f6f8; }
+    h1 { font-size: 1.35rem; color: #1a1a2e; margin-bottom: 8px; }
+    .sub { color: #666; font-size: 0.9rem; margin-bottom: 20px; }
+    section { background: #fff; border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    section h2 { font-size: 1rem; color: #333; margin: 0 0 12px 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eee; }
+    th { color: #666; font-weight: 600; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .query-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    .query-row input[type=date] { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 1rem; }
+    .query-row button { padding: 8px 16px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95rem; }
+    .query-row button:hover { background: #1d4ed8; }
+    .empty { color: #999; padding: 16px 0; }
+    .total { font-weight: 600; color: #1a1a2e; }
+  </style>
+</head>
+<body>
+  <h1>角色经验统计</h1>
+  <p class="sub">支持「分析表格」或「智能表格同步」得到数据；分析后即可<strong>实时</strong>按角色搜索、按日期查询。若已配置管理员密码（.env 中 ADMIN_SECRET），则<strong>未登录者仅可：按角色搜索、各角色总和、按日期查询</strong>；只有管理员登录后才能分析表格、上传文件、合并规则。</p>
+  <p id="dataSourceTip" class="sub" style="margin-bottom:16px;padding:8px 12px;background:#e8f4fd;border-radius:6px;">当前数据：加载中…</p>
+
+  <div id="adminEntry" style="display:none;margin-bottom:16px;padding:10px 14px;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;">
+    <span class="sub" id="adminEntryText">仅管理员可「分析表格」与「合并规则」；其他人仅可：按角色搜索、各角色总和、按日期查询。</span>
+    <button type="button" id="adminLoginBtn" style="margin-left:10px;padding:6px 12px;background:#d97706;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:0.9rem;">管理员登录</button>
+    <span id="adminLoggedIn" style="display:none;"><span class="sub" style="color:#166534;">已以管理员登录</span> <button type="button" id="adminLogoutBtn" style="margin-left:8px;padding:4px 10px;background:#64748b;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem;">退出</button></span>
+  </div>
+  <p id="guestOnlyTip" class="sub" style="display:none;margin-bottom:16px;padding:10px 14px;background:#e0f2fe;border:1px solid #0ea5e9;border-radius:8px;color:#0369a1;">您当前仅可：<strong>按角色名称搜索</strong>、<strong>从今天起各角色差值总和</strong>、<strong>查询某天</strong>。分析表格、上传文件、合并规则仅管理员登录后可见。</p>
+
+  <div id="adminOnlySections">
+  <section>
+    <h2>智能表格同步</h2>
+    <p class="sub" style="margin-bottom:12px;">将智能表格的<strong>导出/分享链接</strong>（能直接打开得到 CSV 或表格文本的地址）填在下方，点「从智能表格获取并分析」即可用线上数据更新本页分析结果；智能表格更新后，别人实时查询到的就是最新数据。也可在服务器 .env 中设置 <code>SYNC_URL</code> 与 <code>SYNC_INTERVAL_MINUTES</code> 实现定时自动同步。</p>
+    <div class="query-row">
+      <input type="text" id="syncUrlInput" placeholder="https:// 智能表格 CSV 或数据导出地址" style="flex:1;min-width:200px;padding:8px 12px;border:1px solid #ddd;border-radius:6px;" />
+      <button type="button" id="syncFromUrlBtn" style="padding:8px 16px;background:#059669;color:#fff;border:none;border-radius:6px;cursor:pointer;">从智能表格获取并分析</button>
+    </div>
+    <p id="syncFromUrlMsg" class="sub" style="margin-top:8px;"></p>
+  </section>
+  <section>
+    <h2>分析表格</h2>
+    <p class="sub" style="margin-bottom:12px;">粘贴智能表格导出的 CSV/TSV（表头需含：等级、经验开始、经验结束、角色名称；可选日期、差值），解析后得到<strong>总计练了多少</strong>和<strong>哪天练了多少</strong>，并保存供下方查询。</p>
+    <div class="query-row" style="align-items:flex-start;">
+      <textarea id="tablePaste" placeholder="在此粘贴表格内容（第一行为表头，逗号或 Tab 分隔）&#10;例如：日期,角色名称,等级,经验值（开始）,经验值（结束）,差值" style="width:100%;min-height:120px;padding:10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;font-size:0.9rem;resize:vertical;"></textarea>
+    </div>
+    <div class="query-row">
+      <input type="file" id="tableFile" accept=".csv,.txt,.xlsx,.xls,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="font-size:0.9rem;" />
+      <button type="button" id="analyzeBtn">分析表格</button>
+    </div>
+    <p class="sub" style="margin-top:6px;">支持 CSV、TXT、Excel（.xlsx）格式；若在下拉框里看不到 .xlsx，请选择「所有文件」。</p>
+    <div id="analyzeResult" style="display:none;margin-top:12px;padding:12px;background:#f0f9ff;border-radius:8px;">
+      <p style="margin:0 0 8px 0;"><strong>分析结果</strong>：共 <span id="analyzeCount">0</span> 条记录，<strong>总计练了 <span id="analyzeTotal">0</span></strong>。已保存，<strong>请直接在下方「按角色名称搜索」输入角色名（如 mao）点搜索</strong>，或选日期点「查询」。</p>
+      <p id="analyzeError" class="empty" style="display:none;margin:0;"></p>
+      <p id="analyzeDebug" class="sub" style="display:none;margin:8px 0 0 0;font-size:0.85rem;"></p>
+    </div>
+  </section>
+
+  <section>
+    <h2>所有角色名称 · 选哪几个是同一角色</h2>
+    <p class="sub" style="margin-bottom:8px;">下面列出全部角色名，<strong>点选多个</strong>后填规范名、点「确认合并」即可合并；也可用下方自动分组的「合并这组」。</p>
+    <div class="query-row" style="margin-bottom:8px;">
+      <p id="rolesList" class="sub" style="margin:0;padding:10px;background:#f8f9fa;border-radius:6px;min-height:24px;flex:1;">请先分析表格，列表会自动出现在这里。</p>
+      <button type="button" id="refreshRolesBtn" style="padding:6px 12px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:0.9rem;white-space:nowrap;">刷新列表</button>
+    </div>
+    <div id="pickMergeBox" style="display:none;margin-top:12px;">
+      <p class="sub" style="margin-bottom:6px;"><strong>自选合并</strong>：点选下面角色（带<span style="color:#ea580c;font-weight:600;">橙框「未加入规则」</span>的为新昵称），规范名可下拉选已有或输入新建。</p>
+      <div id="roleChipsWrap" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;max-height:160px;overflow-y:auto;padding:8px;background:#f8f9fa;border-radius:6px;"></div>
+      <div class="query-row" style="align-items:center;flex-wrap:wrap;">
+        <label class="sub" style="margin:0;">规范名：</label>
+        <select id="mergeCanonicalSelect" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;min-width:140px;">
+          <option value="">（选择已有规范名）</option>
+        </select>
+        <input type="text" id="mergeCanonicalInput" placeholder="新建时输入规范名" style="width:120px;padding:6px 10px;border:1px solid #ddd;border-radius:6px;" />
+        <button type="button" id="confirmMergeBtn" style="padding:6px 14px;background:#16a34a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:0.9rem;">确认合并（新建）</button>
+        <button type="button" id="addToExistingBtn" style="padding:6px 14px;background:#ca8a04;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:0.9rem;">加入已有规则</button>
+        <span id="pickMergeMsg" class="sub" style="margin-left:8px;"></span>
+      </div>
+      <p class="sub" style="margin-top:6px;">新昵称：点选带「未加入规则」的昵称 → 下拉选已有规范名（或输入新建）→ 点「加入已有规则」或「确认合并（新建）」→ 保存。</p>
+    </div>
+    <div id="suggestMergeBox" style="display:none;margin-top:12px;">
+      <p class="sub" style="margin-bottom:8px;"><strong>可能为同一角色</strong>（按大小写自动分组）。若这几位是同一人，点「合并这组」即可。</p>
+      <div id="suggestMergeList" style="display:flex;flex-direction:column;gap:8px;"></div>
+    </div>
+    <p id="noRolesHint" class="empty" style="display:none;margin:8px 0 0 0;">暂无角色数据，请先点「分析表格」。</p>
+  </section>
+
+  <section>
+    <h2>角色合并规则</h2>
+    <p class="sub" style="margin-bottom:8px;">一行一条：<strong>规范名=别名1,别名2,…</strong>（规范名会用于统计与搜索显示）。下方文本框可随时修改，只需追加新规则后点「保存」即可。</p>
+    <textarea id="roleAliasesInput" placeholder="mao=Mao,MAO,米露&#10;xxx=Xxx,XXX" style="width:100%;min-height:80px;padding:10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;font-size:0.9rem;resize:vertical;"></textarea>
+    <div class="query-row" style="margin-top:8px;">
+      <button type="button" id="roleAliasesSaveBtn">保存合并规则</button>
+      <span id="roleAliasesMsg" class="sub" style="margin-left:8px;"></span>
+    </div>
+    <div id="savedRulesRecord" style="margin-top:14px;padding:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;">
+      <p class="sub" style="margin:0 0 8px 0;"><strong>当前已保存的合并规则</strong>（共 <span id="savedRulesCount">0</span> 条，可随时在上方修改并保存）</p>
+      <ul id="savedRulesList" style="margin:0;padding-left:20px;color:#166534;"></ul>
+      <p id="savedRulesEmpty" class="empty" style="margin:0;display:none;">暂无已保存的规则</p>
+    </div>
+  </section>
+  </div>
+
+  <section>
+    <h2>按角色名称搜索</h2>
+    <p class="sub" style="margin-bottom:12px;">输入角色名称（或规范名），查看该角色及合并名称的差值经验（已练）与差值之和。</p>
+    <div class="query-row">
+      <input type="text" id="roleNameInput" placeholder="输入角色名称（支持模糊）" style="min-width:200px;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:1rem;" />
+      <button type="button" id="roleSearchBtn">搜索</button>
+    </div>
+    <div id="roleResult" style="display:none;">
+      <p style="margin:12px 0;"><strong id="roleResultTitle"></strong></p>
+      <p class="sub" style="margin-bottom:6px;"><strong>表格中每条记录（日期 × 角色昵称 × 开始/结束经验 × 差值）</strong></p>
+      <table id="roleRecordsTable">
+        <thead><tr><th>日期</th><th>角色昵称</th><th class="num">开始经验</th><th class="num">结束经验</th><th class="num">差值（已练）</th></tr></thead>
+        <tbody id="roleRecordsBody"></tbody>
+      </table>
+    </div>
+    <p id="roleEmpty" class="empty" style="display:none;">暂无该角色的记录</p>
+  </section>
+
+  <section>
+    <h2>从今天起 · 各角色差值总和</h2>
+    <p class="sub" style="margin-bottom:12px;">统计日期 ≥ <span id="sinceDate">-</span></p>
+    <table>
+      <thead><tr><th>角色名称</th><th class="num">差值总和</th></tr></thead>
+      <tbody id="rolesBody"></tbody>
+      <tfoot><tr><td class="total">合计</td><td class="num total" id="rolesTotal">0</td></tr></tfoot>
+    </table>
+    <p id="rolesEmpty" class="empty" style="display:none;">暂无数据（今天起还没有记录）</p>
+  </section>
+
+  <section>
+    <h2>查询某天练了多少经验（差值）</h2>
+    <div class="query-row">
+      <input type="date" id="queryDate" />
+      <button type="button" id="queryBtn">查询</button>
+    </div>
+    <table id="dayTable" style="display:none;">
+      <thead><tr><th>角色名称</th><th class="num">当日差值</th></tr></thead>
+      <tbody id="dayBody"></tbody>
+      <tfoot><tr><td class="total">当日合计</td><td class="num total" id="dayTotal">0</td></tr></tfoot>
+    </table>
+    <p id="dayEmpty" class="empty" style="display:none;">该日暂无记录</p>
+  </section>
+
+  <script>
+    const base = window.location.origin;
+
+    function todayStr() {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+
+    function getAdminHeaders() {
+      return { 'X-Admin-Token': sessionStorage.getItem('adminToken') || '' };
+    }
+
+    async function loadDataSource() {
+      try {
+        const res = await fetch(base + '/api/data-source');
+        const data = await res.json();
+        const el = document.getElementById('dataSourceTip');
+        if (data.source === 'analyzed') {
+          el.textContent = '当前数据：本次分析结果，共 ' + (data.recordCount || 0).toLocaleString() + ' 条（下方搜索与查询实时使用）';
+          el.style.background = '#e8f4fd';
+        } else {
+          el.textContent = '当前数据：机器人记录，共 ' + (data.recordCount || 0).toLocaleString() + ' 条。上传并分析表格后，将切换为「分析结果」并支持按角色/按日期查询。';
+          el.style.background = '#f5f5f5';
+        }
+      } catch (_) {
+        document.getElementById('dataSourceTip').textContent = '当前数据：未知';
+      }
+    }
+
+    async function initAdminUI() {
+      const adminEntry = document.getElementById('adminEntry');
+      const adminSections = document.getElementById('adminOnlySections');
+      const guestOnlyTip = document.getElementById('guestOnlyTip');
+      const loginBtn = document.getElementById('adminLoginBtn');
+      const loggedInSpan = document.getElementById('adminLoggedIn');
+      try {
+        const res = await fetch(base + '/api/admin-required');
+        const data = await res.json();
+        if (!data.adminRequired) {
+          adminEntry.style.display = 'none';
+          if (guestOnlyTip) guestOnlyTip.style.display = 'none';
+          if (adminSections) adminSections.style.display = 'block';
+          return;
+        }
+        adminEntry.style.display = 'block';
+        const token = sessionStorage.getItem('adminToken');
+        if (token) {
+          if (loginBtn) loginBtn.style.display = 'none';
+          if (loggedInSpan) loggedInSpan.style.display = 'inline';
+          if (adminSections) adminSections.style.display = 'block';
+          if (guestOnlyTip) guestOnlyTip.style.display = 'none';
+        } else {
+          if (loginBtn) loginBtn.style.display = 'inline-block';
+          if (loggedInSpan) loggedInSpan.style.display = 'none';
+          if (adminSections) adminSections.style.display = 'none';
+          if (guestOnlyTip) guestOnlyTip.style.display = 'block';
+        }
+      } catch (_) {
+        adminEntry.style.display = 'none';
+        if (guestOnlyTip) guestOnlyTip.style.display = 'none';
+        if (adminSections) adminSections.style.display = 'block';
+      }
+    }
+
+    let selectedRolesForMerge = new Set();
+
+    function getNamesInRulesFromTextarea() {
+      const ta = document.getElementById('roleAliasesInput');
+      const text = (ta && ta.value) ? ta.value : '';
+      const set = new Set();
+      text.split(/\r?\n/).forEach((l) => {
+        const eq = l.indexOf('=');
+        if (eq <= 0) return;
+        const left = l.slice(0, eq).trim();
+        const right = l.slice(eq + 1).trim();
+        if (left) set.add(left);
+        right.split(',').forEach((s) => { const t = s.trim(); if (t) set.add(t); });
+      });
+      return set;
+    }
+
+    function getCanonicalNamesFromTextarea() {
+      const ta = document.getElementById('roleAliasesInput');
+      const text = (ta && ta.value) ? ta.value : '';
+      const list = [];
+      const seen = new Set();
+      text.split(/\r?\n/).forEach((l) => {
+        const eq = l.indexOf('=');
+        if (eq <= 0) return;
+        const left = l.slice(0, eq).trim();
+        if (left && !seen.has(left)) { seen.add(left); list.push(left); }
+      });
+      return list.sort();
+    }
+
+    function updateCanonicalSelect() {
+      const sel = document.getElementById('mergeCanonicalSelect');
+      if (!sel) return;
+      const canonicals = getCanonicalNamesFromTextarea();
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">（选择已有规范名）</option>' + canonicals.map((c) => '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>').join('');
+      if (cur && canonicals.includes(cur)) sel.value = cur;
+    }
+
+    function updateChipMarkers() {
+      const namesInRules = getNamesInRulesFromTextarea();
+      document.querySelectorAll('#roleChipsWrap button').forEach((btn) => {
+        const name = btn.dataset.role;
+        if (!name) return;
+        const selected = selectedRolesForMerge.has(name);
+        const inRule = namesInRules.has(name);
+        if (selected) {
+          btn.style.background = '#dbeafe';
+          btn.style.borderColor = '#2563eb';
+          btn.style.borderWidth = '1px';
+          btn.title = '已选中';
+          btn.textContent = name;
+        } else if (inRule) {
+          btn.style.background = '#fff';
+          btn.style.borderColor = '#cbd5e1';
+          btn.style.borderWidth = '1px';
+          btn.title = '已在某条合并规则中';
+          btn.textContent = name;
+        } else {
+          btn.style.background = '#fff';
+          btn.style.borderColor = '#ea580c';
+          btn.style.borderWidth = '2px';
+          btn.title = '未加入规则';
+          btn.innerHTML = name + ' <span style="color:#ea580c;font-size:0.7em;margin-left:2px;">未</span>';
+        }
+      });
+    }
+
+    function renderRoleChips(roles) {
+      const wrap = document.getElementById('roleChipsWrap');
+      wrap.innerHTML = '';
+      selectedRolesForMerge.clear();
+      roles.forEach((name) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.textContent = name;
+        chip.dataset.role = name;
+        chip.style.cssText = 'padding:4px 10px;border-radius:999px;cursor:pointer;font-size:0.85rem;';
+        chip.onclick = function() {
+          if (selectedRolesForMerge.has(name)) selectedRolesForMerge.delete(name);
+          else selectedRolesForMerge.add(name);
+          updateChipMarkers();
+        };
+        wrap.appendChild(chip);
+      });
+      updateChipMarkers();
+    }
+
+    function confirmPickMerge() {
+      const names = Array.from(selectedRolesForMerge);
+      if (names.length === 0) {
+        document.getElementById('pickMergeMsg').textContent = '请先点选要合并的角色';
+        return;
+      }
+      const sel = document.getElementById('mergeCanonicalSelect');
+      const canonicalInput = document.getElementById('mergeCanonicalInput');
+      const canonical = (sel && sel.value) ? sel.value.trim() : (canonicalInput.value.trim() || names[0]);
+      const line = canonical + '=' + names.join(',');
+      const ta = document.getElementById('roleAliasesInput');
+      ta.value = ta.value.trim() ? ta.value.trim() + '\n' + line : line;
+      document.getElementById('roleAliasesMsg').textContent = '已加入「' + escapeHtml(canonical) + '」，请点「保存合并规则」生效';
+      document.getElementById('pickMergeMsg').textContent = '已合并 ' + names.length + ' 个，已加入规则';
+      selectedRolesForMerge.clear();
+      if (canonicalInput) canonicalInput.value = '';
+      updateCanonicalSelect();
+      updateChipMarkers();
+    }
+
+    function addToExistingRule() {
+      const names = Array.from(selectedRolesForMerge);
+      if (names.length === 0) {
+        document.getElementById('pickMergeMsg').textContent = '请先点选要加入的新昵称';
+        return;
+      }
+      const sel = document.getElementById('mergeCanonicalSelect');
+      const canonical = (sel && sel.value) ? sel.value.trim() : '';
+      if (!canonical) {
+        document.getElementById('pickMergeMsg').textContent = '请从下拉选择已有规范名';
+        return;
+      }
+      const ta = document.getElementById('roleAliasesInput');
+      const lines = ta.value.split(/\r?\n/);
+      let found = false;
+      const newLines = lines.map((l) => {
+        const eq = l.indexOf('=');
+        if (eq <= 0) return l;
+        const left = l.slice(0, eq).trim();
+        if (left !== canonical) return l;
+        found = true;
+        const right = l.slice(eq + 1).trim();
+        const existing = right.split(',').map((s) => s.trim()).filter(Boolean);
+        const toAdd = names.filter((n) => !existing.includes(n));
+        if (toAdd.length === 0) return l;
+        return left + '=' + right + ',' + toAdd.join(',');
+      });
+      if (!found) {
+        document.getElementById('pickMergeMsg').textContent = '未找到规范名「' + escapeHtml(canonical) + '」的规则，请先保存过该规则或使用「确认合并（新建）」';
+        return;
+      }
+      ta.value = newLines.join('\n');
+      document.getElementById('pickMergeMsg').textContent = '已把 ' + names.join('、') + ' 加入「' + escapeHtml(canonical) + '」，请点「保存合并规则」生效';
+      selectedRolesForMerge.clear();
+      updateCanonicalSelect();
+      updateChipMarkers();
+    }
+
+    function showRolesFromData(roles, suggestMerge) {
+      const listEl = document.getElementById('rolesList');
+      const pickBox = document.getElementById('pickMergeBox');
+      const boxEl = document.getElementById('suggestMergeBox');
+      const noHint = document.getElementById('noRolesHint');
+      if (!roles || roles.length === 0) {
+        listEl.textContent = '请先分析表格，列表会自动出现在这里。';
+        pickBox.style.display = 'none';
+        boxEl.style.display = 'none';
+        noHint.style.display = 'block';
+        return;
+      }
+      noHint.style.display = 'none';
+      listEl.textContent = '全部角色名（' + roles.length + ' 个）';
+      pickBox.style.display = 'block';
+      renderRoleChips(roles);
+      const listDiv = document.getElementById('suggestMergeList');
+      listDiv.innerHTML = '';
+      if (suggestMerge && suggestMerge.length > 0) {
+        boxEl.style.display = 'block';
+        suggestMerge.forEach((g) => {
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;background:#f0f9ff;border-radius:6px;';
+          const label = document.createElement('span');
+          label.textContent = g.key + ' → ' + g.variants.join(', ');
+          label.style.flex = '1 1 200px';
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.placeholder = '规范名';
+          input.value = g.key;
+          input.style.cssText = 'width:90px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;';
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = '合并这组';
+          btn.style.cssText = 'padding:4px 10px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem;';
+          btn.onclick = function() {
+            const canonical = input.value.trim() || g.key;
+            const line = canonical + '=' + g.variants.join(',');
+            const ta = document.getElementById('roleAliasesInput');
+            ta.value = ta.value.trim() ? ta.value.trim() + '\n' + line : line;
+            document.getElementById('roleAliasesMsg').textContent = '已加入「' + canonical + '」，请点「保存合并规则」生效';
+          };
+          row.appendChild(label);
+          row.appendChild(input);
+          row.appendChild(btn);
+          listDiv.appendChild(row);
+        });
+      } else {
+        boxEl.style.display = 'none';
+      }
+    }
+
+    async function loadRolesList() {
+      try {
+        const res = await fetch(base + '/api/roles');
+        const data = await res.json();
+        showRolesFromData(data.roles || [], data.suggestMerge || []);
+      } catch (_) {
+        document.getElementById('rolesList').textContent = '加载失败';
+      }
+    }
+
+    function updateSavedRulesRecord(rulesText) {
+      const lines = (rulesText || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const countEl = document.getElementById('savedRulesCount');
+      const listEl = document.getElementById('savedRulesList');
+      const emptyEl = document.getElementById('savedRulesEmpty');
+      countEl.textContent = lines.length;
+      if (lines.length === 0) {
+        listEl.innerHTML = '';
+        emptyEl.style.display = 'block';
+        return;
+      }
+      emptyEl.style.display = 'none';
+      listEl.innerHTML = lines.map((line) => '<li>' + escapeHtml(line) + '</li>').join('');
+    }
+
+    async function loadRoleAliasesConfig() {
+      try {
+        const res = await fetch(base + '/api/role-aliases');
+        const data = await res.json();
+        const text = data.rulesText || '';
+        document.getElementById('roleAliasesInput').value = text;
+        updateSavedRulesRecord(text);
+        updateCanonicalSelect();
+        updateChipMarkers();
+      } catch (_) {}
+    }
+
+    async function saveRoleAliases() {
+      const rulesText = document.getElementById('roleAliasesInput').value.trim();
+      try {
+        const res = await fetch(base + '/api/role-aliases', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
+          body: JSON.stringify({ rulesText }),
+        });
+        const data = await res.json();
+        const msgEl = document.getElementById('roleAliasesMsg');
+        if (data.error) msgEl.textContent = (res.status === 403 ? '需要管理员权限，请先点击上方「管理员登录」。' : data.error);
+        else {
+          msgEl.textContent = '已保存';
+          updateSavedRulesRecord(rulesText);
+          loadRoleStats();
+        }
+      } catch (e) {
+        document.getElementById('roleAliasesMsg').textContent = '保存失败: ' + e.message;
+      }
+    }
+
+    async function loadRoleStats() {
+      const from = todayStr();
+      document.getElementById('sinceDate').textContent = from;
+      const res = await fetch(base + '/api/stats/roles?from=' + encodeURIComponent(from));
+      const data = await res.json();
+      const tbody = document.getElementById('rolesBody');
+      const totalEl = document.getElementById('rolesTotal');
+      const emptyEl = document.getElementById('rolesEmpty');
+      tbody.innerHTML = '';
+      const entries = Object.entries(data.roles || {}).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+      let total = 0;
+      entries.forEach(([name, sum]) => {
+        total += sum;
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td>' + escapeHtml(name) + '</td><td class="num">' + sum.toLocaleString() + '</td>';
+        tbody.appendChild(tr);
+      });
+      totalEl.textContent = total.toLocaleString();
+      emptyEl.style.display = entries.length ? 'none' : 'block';
+    }
+
+    async function queryDay() {
+      const date = document.getElementById('queryDate').value;
+      if (!date) return;
+      const res = await fetch(base + '/api/query?date=' + encodeURIComponent(date));
+      const data = await res.json();
+      const table = document.getElementById('dayTable');
+      const tbody = document.getElementById('dayBody');
+      const totalEl = document.getElementById('dayTotal');
+      const emptyEl = document.getElementById('dayEmpty');
+      tbody.innerHTML = '';
+      const byRole = data.byRole || {};
+      const entries = Object.entries(byRole).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+      let total = 0;
+      entries.forEach(([name, sum]) => {
+        total += sum;
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td>' + escapeHtml(name) + '</td><td class="num">' + sum.toLocaleString() + '</td>';
+        tbody.appendChild(tr);
+      });
+      totalEl.textContent = total.toLocaleString();
+      table.style.display = entries.length ? 'table' : 'none';
+      emptyEl.style.display = entries.length ? 'none' : 'block';
+    }
+
+    async function searchRole() {
+      const name = document.getElementById('roleNameInput').value.trim();
+      if (!name) return;
+      const res = await fetch(base + '/api/role?name=' + encodeURIComponent(name));
+      const data = await res.json();
+      const resultDiv = document.getElementById('roleResult');
+      const emptyEl = document.getElementById('roleEmpty');
+      const titleEl = document.getElementById('roleResultTitle');
+      const recordsTbody = document.getElementById('roleRecordsBody');
+      if (data.recordCount === 0) {
+        resultDiv.style.display = 'none';
+        emptyEl.style.display = 'block';
+        return;
+      }
+      emptyEl.style.display = 'none';
+      resultDiv.style.display = 'block';
+      const canonical = data.roleName || name;
+      titleEl.textContent = '角色「' + escapeHtml(canonical) + '」';
+      recordsTbody.innerHTML = '';
+      const recordList = Array.isArray(data.records) ? data.records : [];
+      if (recordList.length === 0 && (data.recordCount || 0) > 0) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="5" class="empty">共 ' + (data.recordCount || 0) + ' 条记录，明细未返回，请重新分析表格后再搜索</td>';
+        recordsTbody.appendChild(tr);
+      } else {
+        recordList.forEach((r) => {
+          const tr = document.createElement('tr');
+          const expStart = r.expStart !== undefined && r.expStart !== '' ? Number(r.expStart).toLocaleString() : '—';
+          const expEnd = r.expEnd !== undefined && r.expEnd !== '' ? escapeHtml(String(r.expEnd)) : '—';
+          const displayDate = r.date && /^D(\d{2})$/.test(String(r.date)) ? '日' + String(r.date).slice(1) + '(仅日)' : (r.date != null ? String(r.date) : '');
+          tr.innerHTML = '<td>' + escapeHtml(displayDate) + '</td><td>' + escapeHtml(r.roleName || '未知') + '</td><td class="num">' + expStart + '</td><td class="num">' + expEnd + '</td><td class="num">' + (r.diff || 0).toLocaleString() + '</td>';
+          recordsTbody.appendChild(tr);
+        });
+      }
+    }
+
+    async function analyzeTable() {
+      const fileInput = document.getElementById('tableFile');
+      const pasted = document.getElementById('tablePaste').value.trim();
+      const hasFile = fileInput.files && fileInput.files[0];
+      if (!pasted && !hasFile) {
+        document.getElementById('analyzeResult').style.display = 'block';
+        document.getElementById('analyzeError').textContent = '请先粘贴表格内容或选择文件（支持 .csv / .txt / .xlsx）';
+        document.getElementById('analyzeError').style.display = 'block';
+        return;
+      }
+      document.getElementById('analyzeError').style.display = 'none';
+      const analyzeBtn = document.getElementById('analyzeBtn');
+      const btnText = analyzeBtn.textContent;
+      try {
+        analyzeBtn.disabled = true;
+        analyzeBtn.textContent = '分析中…';
+        let url = base + '/api/analyze-table';
+        let options = { method: 'POST', headers: getAdminHeaders() };
+        if (hasFile) {
+          url = base + '/api/analyze-table-upload';
+          const form = new FormData();
+          form.append('file', fileInput.files[0]);
+          options.body = form;
+        } else {
+          options.headers = { 'Content-Type': 'application/json', ...getAdminHeaders() };
+          options.body = JSON.stringify({ text: pasted });
+        }
+        const res = await fetch(url, options);
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          const raw = await res.text();
+          const preview = raw.slice(0, 80).replace(/\s+/g, ' ');
+          document.getElementById('analyzeResult').style.display = 'block';
+          document.getElementById('analyzeError').textContent = '服务器返回了非 JSON（状态码 ' + res.status + '）。请确认：① 在 f:\\录制 目录运行 node server.js；② 访问的是 http://localhost:3000。若在其它环境部署，请检查服务是否正常启动。响应开头: ' + preview;
+          document.getElementById('analyzeError').style.display = 'block';
+          analyzeBtn.disabled = false;
+          analyzeBtn.textContent = btnText;
+          return;
+        }
+        const data = await res.json();
+        const resultDiv = document.getElementById('analyzeResult');
+        resultDiv.style.display = 'block';
+        document.getElementById('analyzeDebug').style.display = 'none';
+        if (data.error) {
+          const errMsg = (res.status === 403 ? '需要管理员权限，请先点击上方「管理员登录」并输入密码。' : data.error);
+          document.getElementById('analyzeError').textContent = errMsg;
+          document.getElementById('analyzeError').style.display = 'block';
+          if (data.detectedHeaders && data.detectedHeaders.length) {
+            document.getElementById('analyzeDebug').textContent = '检测到的表头：' + data.detectedHeaders.join('、') + '（共 ' + (data.rawRowCount || 0) + ' 行数据）';
+            document.getElementById('analyzeDebug').style.display = 'block';
+          }
+          analyzeBtn.disabled = false;
+          analyzeBtn.textContent = btnText;
+          return;
+        }
+        document.getElementById('analyzeCount').textContent = (data.recordCount || 0).toLocaleString();
+        document.getElementById('analyzeTotal').textContent = (data.totalDiff || 0).toLocaleString();
+        document.getElementById('analyzeError').style.display = 'none';
+        loadDataSource();
+        const roles = data.roles || [];
+        const suggestMerge = data.suggestMerge || [];
+        showRolesFromData(roles, suggestMerge);
+        if (data.recordCount > 0 && roles.length === 0) {
+          document.getElementById('rolesList').textContent = '正在加载角色列表…';
+          document.getElementById('noRolesHint').style.display = 'none';
+          loadRolesList();
+        }
+        loadRoleStats();
+      } catch (e) {
+        document.getElementById('analyzeResult').style.display = 'block';
+        document.getElementById('analyzeError').textContent = '请求失败：' + e.message;
+        document.getElementById('analyzeError').style.display = 'block';
+      }
+      analyzeBtn.disabled = false;
+      analyzeBtn.textContent = btnText;
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    document.getElementById('analyzeBtn').addEventListener('click', analyzeTable);
+    document.getElementById('tableFile').addEventListener('change', function() {
+      if (this.files && this.files[0]) document.getElementById('tablePaste').placeholder = '已选文件：' + this.files[0].name + '（也可继续粘贴覆盖）';
+    });
+    document.getElementById('roleSearchBtn').addEventListener('click', searchRole);
+    document.getElementById('roleNameInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchRole(); });
+    document.getElementById('queryBtn').addEventListener('click', queryDay);
+    document.getElementById('queryDate').value = todayStr();
+    document.getElementById('roleAliasesSaveBtn').addEventListener('click', saveRoleAliases);
+    document.getElementById('confirmMergeBtn').addEventListener('click', confirmPickMerge);
+    document.getElementById('addToExistingBtn').addEventListener('click', addToExistingRule);
+    document.getElementById('roleAliasesInput').addEventListener('input', function() {
+      updateCanonicalSelect();
+      updateChipMarkers();
+    });
+    document.getElementById('refreshRolesBtn').addEventListener('click', function() {
+      document.getElementById('rolesList').textContent = '加载中…';
+      document.getElementById('noRolesHint').style.display = 'none';
+      loadRolesList();
+    });
+    document.getElementById('adminLoginBtn').addEventListener('click', async function() {
+      const p = prompt('请输入管理员密码：');
+      if (p == null) return;
+      try {
+        const res = await fetch(base + '/api/admin-check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: p }),
+        });
+        const data = await res.json();
+        if (data.ok && data.token !== undefined) {
+          sessionStorage.setItem('adminToken', data.token);
+          document.getElementById('adminLoginBtn').style.display = 'none';
+          document.getElementById('adminLoggedIn').style.display = 'inline';
+          document.getElementById('adminOnlySections').style.display = 'block';
+          var gt = document.getElementById('guestOnlyTip');
+          if (gt) gt.style.display = 'none';
+        } else {
+          alert(data.error || '密码错误');
+        }
+      } catch (e) {
+        alert('请求失败：' + e.message);
+      }
+    });
+    document.getElementById('adminLogoutBtn').addEventListener('click', function() {
+      sessionStorage.removeItem('adminToken');
+      document.getElementById('adminLoginBtn').style.display = 'inline-block';
+      document.getElementById('adminLoggedIn').style.display = 'none';
+      document.getElementById('adminOnlySections').style.display = 'none';
+      var gt = document.getElementById('guestOnlyTip');
+      if (gt) gt.style.display = 'block';
+    });
+    document.getElementById('syncFromUrlBtn').addEventListener('click', async function() {
+      var url = (document.getElementById('syncUrlInput') && document.getElementById('syncUrlInput').value) ? document.getElementById('syncUrlInput').value.trim() : '';
+      var msgEl = document.getElementById('syncFromUrlMsg');
+      if (!url) { msgEl.textContent = '请先填写智能表格的 CSV/数据地址'; return; }
+      msgEl.textContent = '正在获取…';
+      try {
+        var res = await fetch(base + '/api/sync-from-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
+          body: JSON.stringify({ url: url }),
+        });
+        var data = await res.json();
+        if (data.error) {
+          msgEl.textContent = res.status === 403 ? '需要管理员权限，请先登录' : data.error;
+          return;
+        }
+        msgEl.textContent = '已同步并分析，共 ' + (data.recordCount || 0) + ' 条。';
+        loadDataSource();
+        if (data.roles && data.roles.length) showRolesFromData(data.roles, data.suggestMerge || []);
+        loadRoleStats();
+      } catch (e) {
+        msgEl.textContent = '请求失败: ' + e.message;
+      }
+    });
+
+    loadDataSource();
+    initAdminUI();
+    loadRolesList();
+    loadRoleAliasesConfig();
+    loadRoleStats();
+  </script>
+</body>
+</html>

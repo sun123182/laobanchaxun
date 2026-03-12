@@ -1,0 +1,13 @@
+# Render 部署配置（可选：在 Render Dashboard 里也可手动创建服务）
+services:
+  - type: web
+    name: role-exp-stats
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # 在 Render Dashboard → Environment 里添加：
+      # ADMIN_SECRET = 你的管理员密码
+      # 可选：SYNC_URL、SYNC_INTERVAL_MINUTES、WECOM_TOKEN 等
