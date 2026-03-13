@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>角色经验统计（离线版）</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 20px; background: #f5f6f8; }
+    h1 { font-size: 1.35rem; color: #1a1a2e; margin-bottom: 8px; }
+    .sub { color: #666; font-size: 0.9rem; margin-bottom: 20px; }
+    section { background: #fff; border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    section h2 { font-size: 1rem; color: #333; margin: 0 0 12px 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eee; }
+    th { color: #666; font-weight: 600; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .query-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    .query-row input[type=date], .query-row input[type=text] { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 1rem; }
+    .query-row button { padding: 8px 16px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95rem; }
+    .query-row button:hover { background: #1d4ed8; }
+    .empty { color: #999; padding: 16px 0; }
+    .total { font-weight: 600; color: #1a1a2e; }
+    .offline-tip { padding: 8px 12px; background: #dcfce7; border: 1px solid #22c55e; border-radius: 6px; margin-bottom: 16px; font-size: 0.9rem; color: #166534; }
+  </style>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>角色经验统计（离线版）</h1>
+  <p class="offline-tip">本页无需启动服务，直接双击打开即可使用。数据保存在本机浏览器中，分析表格、合并规则、按角色搜索、按日期查询均可用。</p>
+  <p id="dataSourceTip" class="sub" style="margin-bottom:16px;padding:8px 12px;background:#e8f4fd;border-radius:6px;">当前数据：暂无分析结果，请先「分析表格」。</p>
+
+  <section>
+    <h2>分析表格</h2>
+    <p class="sub" style="margin-bottom:12px;">粘贴 CSV/TSV 或选择 Excel 文件（表头需含：等级、经验开始/起始、经验结束、角色名称；可选日期、差值）。</p>
+    <div class="query-row" style="align-items:flex-start;">
+      <textarea id="tablePaste" placeholder="在此粘贴表格内容（第一行为表头）&#10;例如：日期,角色名称,等级,经验值（开始）,经验值（结束）,差值" style="width:100%;min-height:120px;padding:10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;font-size:0.9rem;resize:vertical;"></textarea>
+    </div>
+    <div class="query-row">
+      <input type="file" id="tableFile" accept=".csv,.txt,.xlsx,.xls" style="font-size:0.9rem;" />
+      <button type="button" id="analyzeBtn">分析表格</button>
+    </div>
+    <div id="analyzeResult" style="display:none;margin-top:12px;padding:12px;background:#f0f9ff;border-radius:8px;">
+      <p style="margin:0 0 8px 0;"><strong>分析结果</strong>：共 <span id="analyzeCount">0</span> 条记录，总计 <span id="analyzeTotal">0</span>。已保存到本机，可直接在下方按角色搜索或按日期查询。</p>
+      <p id="analyzeError" class="empty" style="display:none;margin:0;"></p>
+    </div>
+  </section>
+
+  <section>
+    <h2>所有角色名称 · 合并规则</h2>
+    <p class="sub" style="margin-bottom:8px;">下面列出全部角色名，可点选多个后填规范名合并；或直接在下方文本框写规则并保存。</p>
+    <div class="query-row" style="margin-bottom:8px;">
+      <p id="rolesList" class="sub" style="margin:0;padding:10px;background:#f8f9fa;border-radius:6px;min-height:24px;flex:1;">请先分析表格。</p>
+      <button type="button" id="refreshRolesBtn" style="padding:6px 12px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;cursor:pointer;">刷新列表</button>
+    </div>
+    <div id="pickMergeBox" style="display:none;margin-top:12px;">
+      <div id="roleChipsWrap" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;max-height:160px;overflow-y:auto;padding:8px;background:#f8f9fa;border-radius:6px;"></div>
+      <div class="query-row">
+        <label class="sub" style="margin:0;">规范名：</label>
+        <select id="mergeCanonicalSelect" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;min-width:140px;"><option value="">（选择已有）</option></select>
+        <input type="text" id="mergeCanonicalInput" placeholder="新建规范名" style="width:120px;" />
+        <button type="button" id="confirmMergeBtn" style="padding:6px 14px;background:#16a34a;color:#fff;border:none;border-radius:6px;cursor:pointer;">确认合并</button>
+        <button type="button" id="addToExistingBtn" style="padding:6px 14px;background:#ca8a04;color:#fff;border:none;border-radius:6px;cursor:pointer;">加入已有规则</button>
+      </div>
+    </div>
+    <div id="suggestMergeBox" style="display:none;margin-top:12px;">
+      <p class="sub" style="margin-bottom:8px;"><strong>可能为同一角色</strong>，点「合并这组」加入规则。</p>
+      <div id="suggestMergeList"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>角色合并规则</h2>
+    <p class="sub" style="margin-bottom:8px;">一行一条：<strong>规范名=别名1,别名2,…</strong> 修改后点「保存」。</p>
+    <textarea id="roleAliasesInput" placeholder="mao=Mao,MAO,米露" style="width:100%;min-height:80px;padding:10px;border:1px solid #ddd;border-radius:6px;font-family:inherit;font-size:0.9rem;resize:vertical;"></textarea>
+    <div class="query-row" style="margin-top:8px;">
+      <button type="button" id="roleAliasesSaveBtn">保存合并规则</button>
+      <span id="roleAliasesMsg" class="sub" style="margin-left:8px;"></span>
+    </div>
+    <p class="sub" style="margin-top:8px;">已保存 <span id="savedRulesCount">0</span> 条规则。</p>
+  </section>
+
+  <section>
+    <h2>按角色名称搜索</h2>
+    <p class="sub" style="margin-bottom:12px;">输入角色名称（或规范名），查看该角色的每条记录。</p>
+    <div class="query-row">
+      <input type="text" id="roleNameInput" placeholder="输入角色名称" style="min-width:200px;" />
+      <button type="button" id="roleSearchBtn">搜索</button>
+    </div>
+    <div id="roleResult" style="display:none;">
+      <p style="margin:12px 0;"><strong id="roleResultTitle"></strong></p>
+      <p class="sub" style="margin-bottom:6px;"><strong>表格中每条记录</strong></p>
+      <table id="roleRecordsTable">
+        <thead><tr><th>日期</th><th>角色昵称</th><th class="num">开始经验</th><th class="num">结束经验</th><th class="num">差值</th></tr></thead>
+        <tbody id="roleRecordsBody"></tbody>
+      </table>
+    </div>
+    <p id="roleEmpty" class="empty" style="display:none;">暂无该角色的记录</p>
+  </section>
+
+  <section>
+    <h2>从今天起 · 各角色差值总和</h2>
+    <p class="sub" style="margin-bottom:12px;">统计日期 ≥ <span id="sinceDate">-</span></p>
+    <table>
+      <thead><tr><th>角色名称</th><th class="num">差值总和</th></tr></thead>
+      <tbody id="rolesBody"></tbody>
+      <tfoot><tr><td class="total">合计</td><td class="num total" id="rolesTotal">0</td></tr></tfoot>
+    </table>
+  </section>
+
+  <section>
+    <h2>查询某天练了多少经验</h2>
+    <div class="query-row">
+      <input type="date" id="queryDate" />
+      <button type="button" id="queryBtn">查询</button>
+    </div>
+    <table id="dayTable" style="display:none;">
+      <thead><tr><th>角色名称</th><th class="num">当日差值</th></tr></thead>
+      <tbody id="dayBody"></tbody>
+      <tfoot><tr><td class="total">当日合计</td><td class="num total" id="dayTotal">0</td></tfoot>
+    </table>
+    <p id="dayEmpty" class="empty" style="display:none;">该日暂无记录</p>
+  </section>
+
+  <script>
+(function() {
+  const STORAGE_ANALYZED = 'roleExpAnalyzed';
+  const STORAGE_ALIASES = 'roleExpRoleAliases';
+
+  const EXP_TABLE = { 1:15,2:34,3:57,4:92,5:135,6:372,7:560,8:840,9:1242,10:1716,11:2360,12:3216,13:4200,14:5460,15:7050,16:8840,17:11040,18:13716,19:16680,20:20216,21:24402,22:28980,23:34320,24:40512,25:47216,26:54900,27:63666,28:73080,29:83720,30:95700,31:108480,32:122760,33:138666,34:155540,35:174216,36:194832,37:216600,38:240500,39:266682,40:294216,41:324240,42:356916,43:391160,44:428280,45:468450,46:510420,47:555680,48:604416,49:655200,50:709716,51:748608,52:789631,53:832902,54:878545,55:926689,56:977471,57:1031036,58:1087536,59:1147132,60:1209994,61:1276301,62:1346242,63:1420016,64:1497832,65:1579913,66:1666492,67:1757815,68:1854143,69:1955750,70:2062925,71:2175973,72:2295216,73:2420993,74:2553663,75:2693603,76:2841212,77:2996910,78:3161140,79:3334370,80:3517093,81:3709829,82:3913127,83:4127566,84:4353756,85:4592341,86:4844001,87:5109452,88:5389449,89:5684790,90:5996316,91:6324914,92:6671519,93:7037118,94:7422752,95:7829518,96:8258575,97:8711144,98:9188514,99:9692044,100:10223168,101:10783397,102:11374327,103:11997640,104:12655110,105:13348610,106:14080113,107:14851703,108:15665576,109:16524049,110:17429566,111:18384706,112:19392187,113:20454878,114:21575805,115:22758159,116:24005306,117:25320796,118:26708375,119:28171993,120:29715818,121:31344244,122:33061908,123:34873700,124:36784778,125:38800583,126:40926854,127:43169645,128:45535341,129:48030677,130:50662758,131:53439077,132:56367538,133:59456479,134:62714694,135:66151459,136:69776558,137:73600313,138:77633610,139:81887931,140:86375389,141:91108760,142:96101520,143:101367883,144:106922842,145:112782213,146:118962678,147:125481832,148:132358236,149:139611467,150:147262175,151:155332142,152:163844343,153:172823012,154:182293713,155:192283408,156:202820538,157:213935103,158:225658746,159:238024845,160:251068606,161:264827165,162:279339693,163:294647508,164:310794191,165:327825712,166:345790561,167:364739883,168:384727628,169:405810702,170:428049128,171:451506220,172:476248760,173:502347192,174:529875818,175:558913012,176:589541445,177:621848316,178:655925603,179:691870326,180:729784819,181:769777027,182:811960808,183:856456260,184:903390063,185:952895838,186:1005114529,187:1060194805,188:1118293480,189:1179575962,190:1244216724,191:1312399800,192:1384319309,193:1460180007,194:1540197871,195:1624600714,196:1713628833,197:1807535693,198:1906588648,199:2011069705,200:2121276324 };
+
+  function parseNum(v) {
+    if (v === undefined || v === null) return NaN;
+    const s = String(v).replace(/[\s,，\u200B-\u200D\uFEFF]/g, '').trim();
+    let n = parseInt(s, 10);
+    if (Number.isNaN(n)) { const m = s.match(/\d+/); n = m ? parseInt(m[0], 10) : NaN; }
+    return n;
+  }
+  function expForLevel(level) { return EXP_TABLE[level] ?? null; }
+  function calcDiffAndSalary(level, expStart, expEndStr, roleName) {
+    const levelNum = parseNum(level);
+    const hasLevel = !Number.isNaN(levelNum);
+    const startNum = parseNum(expStart);
+    const endStr = String(expEndStr ?? '').trim();
+    const role = (roleName || '').trim();
+    if (Number.isNaN(startNum)) return { diff: null, salary: null, skip: true };
+    const upgradeMatch = endStr.match(/升[级級]\s*[\+＋]?\s*(\d+)/);
+    let diff;
+    if (upgradeMatch) {
+      if (!hasLevel) return { diff: null, salary: null, skip: true };
+      const extra = parseInt(upgradeMatch[1], 10);
+      const need = expForLevel(levelNum);
+      if (need == null) return { diff: null, salary: null, skip: true };
+      diff = Math.round(need / 10000 - startNum + extra);
+    } else {
+      const endNum = parseNum(expEndStr);
+      if (Number.isNaN(endNum)) return { diff: null, salary: null, skip: true };
+      diff = Math.max(0, endNum - startNum);
+    }
+    return { diff, salary: 0, skip: false };
+  }
+
+  function parseTable(text) {
+    let s = String(text || '').replace(/^\uFEFF/, '').trim();
+    const lines = s.split(/\r?\n/).filter(function(l) { return l.length > 0; });
+    if (lines.length === 0) return { headers: [], rows: [] };
+    const first = lines[0];
+    const delim = first.includes('\t') ? '\t' : ',';
+    const headers = first.split(delim).map(function(h) { return String(h).replace(/\s+/g, ' ').trim(); });
+    const rows = lines.slice(1).map(function(line) { return line.split(delim).map(function(c) { return String(c).replace(/\s+/g, ' ').trim(); }); });
+    return { headers: headers, rows: rows };
+  }
+
+  function normalizeDateCell(v) {
+    const s = String(v || '').trim();
+    if (!s) return null;
+    const dotOrSlash = s.match(/^(\d{1,2})[./](\d{1,2})$/);
+    if (dotOrSlash) {
+      const month = parseInt(dotOrSlash[1], 10);
+      const day = parseInt(dotOrSlash[2], 10);
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        const y = new Date().getFullYear();
+        return y + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+      }
+    }
+    let num = parseInt(s, 10);
+    if (Number.isNaN(num)) num = Math.floor(parseFloat(s));
+    if (!Number.isNaN(num)) {
+      if (num >= 1 && num <= 31) return 'D' + String(num).padStart(2, '0');
+      if (num >= 1 && num <= 2958465) {
+        const d = new Date(1900, 0, 1);
+        d.setDate(d.getDate() + (num - 1));
+        const y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
+        if (y >= 1900 && y <= 2100) return y + '-' + String(m).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+      }
+    }
+    const full = s.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (full) return full[1] + '-' + String(parseInt(full[2], 10)).padStart(2, '0') + '-' + String(parseInt(full[3], 10)).padStart(2, '0');
+    const part = s.match(/(\d{1,2})[-/](\d{1,2})/);
+    if (part) {
+      const now = new Date();
+      return now.getFullYear() + '-' + String(parseInt(part[1], 10)).padStart(2, '0') + '-' + String(parseInt(part[2], 10)).padStart(2, '0');
+    }
+    return null;
+  }
+
+  function analyzeTableContent(text) {
+    const parsed = parseTable(text);
+    const headers = parsed.headers;
+    const rows = parsed.rows;
+    const idxLevel = headers.findIndex(function(h) { return /等级/.test(h); });
+    let idxExpStart = headers.findIndex(function(h) { return /经验.*开始|开始.*经验|起始.*经验|经验.*起始/.test(h); });
+    if (idxExpStart < 0) idxExpStart = headers.findIndex(function(h) { return /^开始$|^开始经验$|^起始经验$/.test(h) || /开始|起始/.test(h); });
+    let idxExpEnd = headers.findIndex(function(h) { return /经验.*结束|结束.*经验/.test(h); });
+    if (idxExpEnd < 0) idxExpEnd = headers.findIndex(function(h) { return /^结束$|^结束经验$/.test(h) || /结束/.test(h); });
+    const idxRole = headers.findIndex(function(h) { return /角色|昵称/.test(h); });
+    const idxDiff = headers.findIndex(function(h) { return /差值/.test(h); });
+    const idxDate = headers.findIndex(function(h) { return /日期/.test(h); });
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const result = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row.every(function(c) { return !String(c).trim(); })) continue;
+      const level = row[idxLevel];
+      const expStart = row[idxExpStart] ?? row[idxExpStart - 1] ?? row[idxExpStart + 1];
+      const expEnd = row[idxExpEnd] ?? row[idxExpEnd - 1] ?? row[idxExpEnd + 1];
+      const roleName = idxRole >= 0 ? (row[idxRole] || '').trim() : '';
+      let date = idxDate >= 0 ? normalizeDateCell(row[idxDate]) : null;
+      if (!date) date = todayStr;
+      let diff = null;
+      if (idxDiff >= 0 && row[idxDiff] !== undefined && row[idxDiff] !== '') {
+        const d = parseNum(row[idxDiff]);
+        if (!Number.isNaN(d)) diff = d;
+      }
+      if (diff === null && level !== undefined && expStart !== undefined && expEnd !== undefined) {
+        const calc = calcDiffAndSalary(level, expStart, expEnd, roleName);
+        if (!calc.skip) diff = calc.diff;
+      }
+      if (diff === null || Number.isNaN(diff)) continue;
+      const expStartNum = parseNum(expStart);
+      result.push({
+        date: date,
+        roleName: roleName || '未知',
+        diff: diff,
+        expStart: Number.isNaN(expStartNum) ? '' : expStartNum,
+        expEnd: (expEnd !== undefined && expEnd !== null) ? String(expEnd).trim() : ''
+      });
+    }
+    let totalDiff = 0;
+    const byDate = {};
+    const byRole = {};
+    for (let j = 0; j < result.length; j++) {
+      const r = result[j];
+      totalDiff += r.diff;
+      byDate[r.date] = (byDate[r.date] || 0) + r.diff;
+      byRole[r.roleName] = (byRole[r.roleName] || 0) + r.diff;
+    }
+    return { rows: result, totalDiff: totalDiff, byDate: byDate, byRole: byRole, detectedHeaders: headers, rawRowCount: rows.length };
+  }
+
+  function parseRoleRules(rulesText) {
+    const aliases = {};
+    const lines = String(rulesText || '').split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq <= 0) continue;
+      const canonical = line.slice(0, eq).trim();
+      if (!canonical) continue;
+      aliases[canonical] = canonical;
+      const right = line.slice(eq + 1).split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+      for (let k = 0; k < right.length; k++) aliases[right[k]] = canonical;
+    }
+    return aliases;
+  }
+
+  function loadAnalyzed() {
+    try {
+      const raw = localStorage.getItem(STORAGE_ANALYZED);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (data && data.rows && data.rows.length > 0) return data;
+      }
+    } catch (e) {}
+    return null;
+  }
+  function saveAnalyzed(data) {
+    try {
+      localStorage.setItem(STORAGE_ANALYZED, JSON.stringify({ ...data, updatedAt: new Date().toISOString() }));
+    } catch (e) {}
+  }
+  function loadAliasesText() { return localStorage.getItem(STORAGE_ALIASES) || ''; }
+  function saveAliasesText(text) { try { localStorage.setItem(STORAGE_ALIASES, text || ''); } catch (e) {} }
+  function getCanonicalRoleName(name) {
+    const aliases = parseRoleRules(loadAliasesText());
+    return aliases[name] !== undefined ? aliases[name] : name;
+  }
+  function getVariantsForCanonical(canonical) {
+    const aliases = parseRoleRules(loadAliasesText());
+    const list = [];
+    const seen = {};
+    if (canonical && !seen[canonical]) { list.push(canonical); seen[canonical] = true; }
+    for (const key in aliases) { if (aliases[key] === canonical && !seen[key]) { list.push(key); seen[key] = true; } }
+    return list.sort();
+  }
+
+  function escapeHtml(s) {
+    const div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+  }
+  function todayStr() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function loadDataSource() {
+    const analyzed = loadAnalyzed();
+    const el = document.getElementById('dataSourceTip');
+    if (analyzed && analyzed.rows && analyzed.rows.length > 0) {
+      el.textContent = '当前数据：本机分析结果，共 ' + analyzed.rows.length + ' 条（下方搜索与查询使用）';
+      el.style.background = '#e8f4fd';
+    } else {
+      el.textContent = '当前数据：暂无分析结果，请先「分析表格」。';
+      el.style.background = '#f5f5f5';
+    }
+  }
+
+  let selectedRolesForMerge = {};
+  function getNamesInRules() {
+    const set = {};
+    const text = (document.getElementById('roleAliasesInput') && document.getElementById('roleAliasesInput').value) || '';
+    text.split(/\r?\n/).forEach(function(l) {
+      const eq = l.indexOf('=');
+      if (eq <= 0) return;
+      const left = l.slice(0, eq).trim();
+      const right = l.slice(eq + 1).trim();
+      if (left) set[left] = true;
+      right.split(',').forEach(function(s) { const t = s.trim(); if (t) set[t] = true; });
+    });
+    return set;
+  }
+  function updateCanonicalSelect() {
+    const sel = document.getElementById('mergeCanonicalSelect');
+    if (!sel) return;
+    const names = getNamesInRules();
+    const canonicals = [];
+    for (const k in names) canonicals.push(k);
+    canonicals.sort();
+    sel.innerHTML = '<option value="">（选择已有）</option>' + canonicals.map(function(c) { return '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>'; }).join('');
+  }
+  function updateChipMarkers() {
+    const wrap = document.getElementById('roleChipsWrap');
+    if (!wrap) return;
+    const inRules = getNamesInRules();
+    const chips = wrap.querySelectorAll('.role-chip');
+    chips.forEach(function(chip) {
+      const name = chip.getAttribute('data-name');
+      if (inRules[name]) chip.style.border = '1px solid #22c55e'; else chip.style.border = '2px solid #ea580c';
+    });
+  }
+  function showRolesFromData(roles, suggestMerge) {
+    const listEl = document.getElementById('rolesList');
+    const pickBox = document.getElementById('pickMergeBox');
+    const suggestBox = document.getElementById('suggestMergeBox');
+    const chipsWrap = document.getElementById('roleChipsWrap');
+    const suggestList = document.getElementById('suggestMergeList');
+    if (!roles || roles.length === 0) {
+      listEl.textContent = '请先分析表格';
+      pickBox.style.display = 'none';
+      suggestBox.style.display = 'none';
+      return;
+    }
+    listEl.textContent = '全部角色名（' + roles.length + ' 个）';
+    pickBox.style.display = 'block';
+    chipsWrap.innerHTML = '';
+    const inRules = getNamesInRules();
+    roles.forEach(function(name) {
+      const chip = document.createElement('span');
+      chip.className = 'role-chip';
+      chip.setAttribute('data-name', name);
+      chip.style.cssText = 'display:inline-block;padding:4px 10px;border-radius:6px;cursor:pointer;margin:2px;font-size:0.9rem;' + (inRules[name] ? 'border:1px solid #22c55e;background:#f0fdf4;' : 'border:2px solid #ea580c;background:#fff7ed;');
+      chip.textContent = name;
+      chip.onclick = function() {
+        if (selectedRolesForMerge[name]) delete selectedRolesForMerge[name]; else selectedRolesForMerge[name] = true;
+        chip.style.background = selectedRolesForMerge[name] ? '#dbeafe' : (inRules[name] ? '#f0fdf4' : '#fff7ed');
+      };
+      chipsWrap.appendChild(chip);
+    });
+    updateCanonicalSelect();
+    if (suggestMerge && suggestMerge.length > 0) {
+      suggestBox.style.display = 'block';
+      suggestList.innerHTML = '';
+      suggestMerge.forEach(function(g) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+        const label = document.createElement('span');
+        label.textContent = (g.key || g.variants[0]) + ' → ' + (g.variants ? g.variants.join(', ') : '');
+        label.className = 'sub';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = '规范名';
+        input.value = g.key || '';
+        input.style.cssText = 'padding:4px 8px;width:100px;';
+        const btn = document.createElement('button');
+        btn.textContent = '合并这组';
+        btn.style.cssText = 'padding:4px 10px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer;';
+        btn.onclick = function() {
+          const canonical = input.value.trim() || g.key;
+          const line = canonical + '=' + (g.variants || []).join(',');
+          const ta = document.getElementById('roleAliasesInput');
+          ta.value = ta.value.trim() ? ta.value.trim() + '\n' + line : line;
+          document.getElementById('roleAliasesMsg').textContent = '已加入「' + canonical + '」，请点「保存合并规则」';
+        };
+        row.appendChild(label);
+        row.appendChild(input);
+        row.appendChild(btn);
+        suggestList.appendChild(row);
+      });
+    } else suggestBox.style.display = 'none';
+  }
+  function confirmPickMerge() {
+    const names = Object.keys(selectedRolesForMerge).filter(function(k) { return selectedRolesForMerge[k]; });
+    if (names.length === 0) { document.getElementById('pickMergeMsg').textContent = '请先点选要合并的角色'; return; }
+    const canonical = document.getElementById('mergeCanonicalInput').value.trim() || document.getElementById('mergeCanonicalSelect').value;
+    if (!canonical) { document.getElementById('pickMergeMsg').textContent = '请选择或输入规范名'; return; }
+    const line = canonical + '=' + names.join(',');
+    const ta = document.getElementById('roleAliasesInput');
+    ta.value = ta.value.trim() ? ta.value.trim() + '\n' + line : line;
+    document.getElementById('pickMergeMsg').textContent = '已加入，请点「保存合并规则」';
+    selectedRolesForMerge = {};
+    updateChipMarkers();
+    var chips = document.querySelectorAll('.role-chip');
+    chips.forEach(function(c) { c.style.background = ''; });
+  }
+  function addToExistingRule() {
+    const names = Object.keys(selectedRolesForMerge).filter(function(k) { return selectedRolesForMerge[k]; });
+    if (names.length === 0) { document.getElementById('pickMergeMsg').textContent = '请先点选要加入的角色'; return; }
+    const canonical = document.getElementById('mergeCanonicalSelect').value;
+    if (!canonical) { document.getElementById('pickMergeMsg').textContent = '请选择已有规范名'; return; }
+    const ta = document.getElementById('roleAliasesInput');
+    const lines = (ta.value || '').split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim().startsWith(canonical + '=')) {
+        lines[i] = lines[i].trim() + ',' + names.join(',');
+        ta.value = lines.join('\n');
+        document.getElementById('pickMergeMsg').textContent = '已加入「' + canonical + '」，请点「保存」';
+        selectedRolesForMerge = {};
+        updateChipMarkers();
+        return;
+      }
+    }
+    ta.value = ta.value.trim() ? ta.value.trim() + '\n' + canonical + '=' + names.join(',') : canonical + '=' + names.join(',');
+    document.getElementById('pickMergeMsg').textContent = '已加入，请点「保存」';
+    selectedRolesForMerge = {};
+    updateChipMarkers();
+  }
+
+  function loadRolesList() {
+    const analyzed = loadAnalyzed();
+    if (!analyzed || !analyzed.rows || analyzed.rows.length === 0) {
+      showRolesFromData([], []);
+      return;
+    }
+    const byRole = analyzed.byRole || {};
+    const roles = Object.keys(byRole).sort();
+    const key = function(s) { return String(s).toLowerCase().trim(); };
+    const byKey = {};
+    roles.forEach(function(name) {
+      const k = key(name);
+      if (!byKey[k]) byKey[k] = [];
+      byKey[k].push(name);
+    });
+    const suggestMerge = Object.keys(byKey).filter(function(k) { return byKey[k].length > 1; }).map(function(k) { return { key: k, variants: byKey[k].sort() }; });
+    showRolesFromData(roles, suggestMerge);
+  }
+  function loadRoleStats() {
+    const from = todayStr();
+    document.getElementById('sinceDate').textContent = from;
+    const analyzed = loadAnalyzed();
+    const tbody = document.getElementById('rolesBody');
+    const totalEl = document.getElementById('rolesTotal');
+    if (!analyzed || !analyzed.rows || analyzed.rows.length === 0) {
+      tbody.innerHTML = '';
+      totalEl.textContent = '0';
+      return;
+    }
+    const byRole = {};
+    analyzed.rows.forEach(function(r) {
+      if ((r.date || '') >= from) {
+        const can = getCanonicalRoleName(r.roleName || '');
+        byRole[can] = (byRole[can] || 0) + (r.diff || 0);
+      }
+    });
+    const entries = Object.keys(byRole).filter(function(k) { return byRole[k] > 0; }).sort(function(a, b) { return byRole[b] - byRole[a]; });
+    let total = 0;
+    tbody.innerHTML = '';
+    entries.forEach(function(k) {
+      total += byRole[k];
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + escapeHtml(k) + '</td><td class="num">' + byRole[k].toLocaleString() + '</td>';
+      tbody.appendChild(tr);
+    });
+    totalEl.textContent = total.toLocaleString();
+  }
+  function queryDay() {
+    const date = document.getElementById('queryDate').value;
+    if (!date) return;
+    const analyzed = loadAnalyzed();
+    const table = document.getElementById('dayTable');
+    const tbody = document.getElementById('dayBody');
+    const totalEl = document.getElementById('dayTotal');
+    const emptyEl = document.getElementById('dayEmpty');
+    tbody.innerHTML = '';
+    if (!analyzed || !analyzed.rows) {
+      table.style.display = 'none';
+      emptyEl.style.display = 'block';
+      return;
+    }
+    const byRole = {};
+    analyzed.rows.forEach(function(r) {
+      if ((r.date || '') === date) {
+        const can = getCanonicalRoleName(r.roleName || '');
+        byRole[can] = (byRole[can] || 0) + (r.diff || 0);
+      }
+    });
+    const entries = Object.keys(byRole).filter(function(k) { return byRole[k] > 0; }).sort(function(a, b) { return byRole[b] - byRole[a]; });
+    let total = 0;
+    entries.forEach(function(k) {
+      total += byRole[k];
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td>' + escapeHtml(k) + '</td><td class="num">' + byRole[k].toLocaleString() + '</td>';
+      tbody.appendChild(tr);
+    });
+    totalEl.textContent = total.toLocaleString();
+    table.style.display = entries.length ? 'table' : 'none';
+    emptyEl.style.display = entries.length ? 'none' : 'block';
+  }
+  function searchRole() {
+    const name = document.getElementById('roleNameInput').value.trim();
+    if (!name) return;
+    const canonicalSearch = getCanonicalRoleName(name);
+    const analyzed = loadAnalyzed();
+    const resultDiv = document.getElementById('roleResult');
+    const emptyEl = document.getElementById('roleEmpty');
+    const titleEl = document.getElementById('roleResultTitle');
+    const recordsTbody = document.getElementById('roleRecordsBody');
+    if (!analyzed || !analyzed.rows || analyzed.rows.length === 0) {
+      resultDiv.style.display = 'none';
+      emptyEl.style.display = 'block';
+      return;
+    }
+    const records = analyzed.rows.filter(function(r) {
+      const can = getCanonicalRoleName(r.roleName || '');
+      return can === canonicalSearch || (r.roleName || '').indexOf(name) !== -1;
+    });
+    if (records.length === 0) {
+      resultDiv.style.display = 'none';
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+    resultDiv.style.display = 'block';
+    titleEl.textContent = '角色「' + escapeHtml(canonicalSearch) + '」';
+    const recordsList = records.map(function(r) {
+      return { date: r.date, roleName: r.roleName || '未知', diff: r.diff || 0, expStart: r.expStart !== undefined ? r.expStart : '', expEnd: r.expEnd !== undefined ? r.expEnd : '' };
+    }).sort(function(a, b) { return (b.date || '').localeCompare(a.date || '') || (a.roleName || '').localeCompare(b.roleName || ''); });
+    recordsTbody.innerHTML = '';
+    recordsList.forEach(function(r) {
+      const tr = document.createElement('tr');
+      const expStart = r.expStart !== undefined && r.expStart !== '' ? Number(r.expStart).toLocaleString() : '—';
+      const expEnd = r.expEnd !== undefined && r.expEnd !== '' ? escapeHtml(String(r.expEnd)) : '—';
+      const displayDate = r.date && /^D(\d{2})$/.test(String(r.date)) ? '日' + String(r.date).slice(1) + '(仅日)' : (r.date != null ? String(r.date) : '');
+      tr.innerHTML = '<td>' + escapeHtml(displayDate) + '</td><td>' + escapeHtml(r.roleName) + '</td><td class="num">' + expStart + '</td><td class="num">' + expEnd + '</td><td class="num">' + (r.diff || 0).toLocaleString() + '</td>';
+      recordsTbody.appendChild(tr);
+    });
+  }
+  function runAnalyze(text) {
+    const analyzed = analyzeTableContent(text);
+    if (!analyzed.rows || analyzed.rows.length === 0) {
+      document.getElementById('analyzeResult').style.display = 'block';
+      document.getElementById('analyzeError').textContent = '未能解析出有效记录，请确认表头含：等级、经验开始/结束、角色名称；或有「差值」列。';
+      document.getElementById('analyzeError').style.display = 'block';
+      return;
+    }
+    saveAnalyzed(analyzed);
+    document.getElementById('analyzeCount').textContent = analyzed.rows.length.toLocaleString();
+    document.getElementById('analyzeTotal').textContent = analyzed.totalDiff.toLocaleString();
+    document.getElementById('analyzeError').style.display = 'none';
+    document.getElementById('analyzeResult').style.display = 'block';
+    loadDataSource();
+    showRolesFromData(Object.keys(analyzed.byRole || {}).sort(), (function() {
+      const roles = Object.keys(analyzed.byRole || {}).sort();
+      const key = function(s) { return String(s).toLowerCase().trim(); };
+      const byKey = {};
+      roles.forEach(function(name) { const k = key(name); if (!byKey[k]) byKey[k] = []; byKey[k].push(name); });
+      return Object.keys(byKey).filter(function(k) { return byKey[k].length > 1; }).map(function(k) { return { key: k, variants: byKey[k].sort() }; });
+    })());
+    loadRoleStats();
+  }
+  function analyzeTable() {
+    const pasted = document.getElementById('tablePaste').value.trim();
+    const fileInput = document.getElementById('tableFile');
+    const hasFile = fileInput.files && fileInput.files[0];
+    if (!pasted && !hasFile) {
+      document.getElementById('analyzeResult').style.display = 'block';
+      document.getElementById('analyzeError').textContent = '请先粘贴表格内容或选择文件（CSV/TXT/Excel）';
+      document.getElementById('analyzeError').style.display = 'block';
+      return;
+    }
+    document.getElementById('analyzeError').style.display = 'none';
+    if (hasFile) {
+      const file = fileInput.files[0];
+      const name = (file.name || '').toLowerCase();
+      if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+        if (typeof XLSX === 'undefined') {
+          document.getElementById('analyzeResult').style.display = 'block';
+          document.getElementById('analyzeError').textContent = 'Excel 解析需要联网加载脚本。请将表格另存为 CSV 后粘贴到上方文本框，或选择 CSV/TXT 文件。';
+          document.getElementById('analyzeError').style.display = 'block';
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            const wb = XLSX.read(e.target.result, { type: 'binary' });
+            if (!wb.SheetNames || !wb.SheetNames.length) { document.getElementById('analyzeError').textContent = 'Excel 中无工作表'; document.getElementById('analyzeError').style.display = 'block'; return; }
+            const sheet = wb.Sheets[wb.SheetNames[0]];
+            const csv = XLSX.utils.sheet_to_csv(sheet);
+            runAnalyze(csv);
+          } catch (err) {
+            document.getElementById('analyzeError').textContent = '解析失败: ' + (err.message || err);
+            document.getElementById('analyzeError').style.display = 'block';
+          }
+        };
+        reader.readAsBinaryString(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = function(e) { runAnalyze(e.target.result); };
+        reader.readAsText(file, 'utf8');
+      }
+    } else {
+      runAnalyze(pasted);
+    }
+  }
+  function saveRoleAliases() {
+    const rulesText = document.getElementById('roleAliasesInput').value.trim();
+    saveAliasesText(rulesText);
+    document.getElementById('roleAliasesMsg').textContent = '已保存';
+    const lines = (rulesText || '').split(/\r?\n/).map(function(l) { return l.trim(); }).filter(Boolean);
+    document.getElementById('savedRulesCount').textContent = lines.length;
+    loadRoleStats();
+  }
+  function loadRoleAliasesConfig() {
+    const text = loadAliasesText();
+    document.getElementById('roleAliasesInput').value = text;
+    const lines = (text || '').split(/\r?\n/).map(function(l) { return l.trim(); }).filter(Boolean);
+    document.getElementById('savedRulesCount').textContent = lines.length;
+    updateCanonicalSelect();
+    updateChipMarkers();
+  }
+
+  document.getElementById('analyzeBtn').addEventListener('click', analyzeTable);
+  document.getElementById('roleSearchBtn').addEventListener('click', searchRole);
+  document.getElementById('roleNameInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') searchRole(); });
+  document.getElementById('queryBtn').addEventListener('click', queryDay);
+  document.getElementById('queryDate').value = todayStr();
+  document.getElementById('roleAliasesSaveBtn').addEventListener('click', saveRoleAliases);
+  document.getElementById('confirmMergeBtn').addEventListener('click', confirmPickMerge);
+  document.getElementById('addToExistingBtn').addEventListener('click', addToExistingRule);
+  document.getElementById('refreshRolesBtn').addEventListener('click', function() { loadRolesList(); });
+  document.getElementById('roleAliasesInput').addEventListener('input', function() { updateCanonicalSelect(); updateChipMarkers(); });
+
+  loadDataSource();
+  loadRoleAliasesConfig();
+  loadRolesList();
+  loadRoleStats();
+})();
+  </script>
+</body>
+</html>
